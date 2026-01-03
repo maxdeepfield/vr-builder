@@ -76,7 +76,8 @@ scene.add(gridHelperMajor);
 
 // State
 const boxes = [];
-let selectedBox = null;
+let selectedBoxes = []; // Multi-select support
+let selectedBox = null; // Primary selected box (for gizmo positioning)
 let activeHandle = null;
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
@@ -221,12 +222,16 @@ planeConfigs.forEach(cfg => {
 });
 
 function updateGizmo() {
-  if (selectedBox && editMode === 'move') {
-    gizmoGroup.position.copy(selectedBox.position);
+  if (selectedBoxes.length > 0 && editMode === 'move') {
+    // Position gizmo at center of all selected boxes
+    const center = new THREE.Vector3();
+    selectedBoxes.forEach(box => center.add(box.position));
+    center.divideScalar(selectedBoxes.length);
+    gizmoGroup.position.copy(center);
     gizmoGroup.visible = true;
     
     // Scale gizmo based on camera distance to keep constant screen size
-    const dist = camera.position.distanceTo(selectedBox.position);
+    const dist = camera.position.distanceTo(center);
     const scale = dist * 0.1;
     gizmoGroup.scale.setScalar(scale);
   } else {
@@ -344,35 +349,65 @@ function updateHandles(box) {
   handles[5].position.set(p.x, p.y, p.z - s.z / 2); // -Z
 }
 
-function selectBox(box) {
-  if (selectedBox) {
-    selectedBox.material.transparent = false;
-    selectedBox.material.opacity = 1;
-    selectedBox.material.needsUpdate = true;
-    selectedBox.userData.handles.forEach(h => h.visible = false);
-    if (selectedBox.userData.edges) selectedBox.userData.edges.visible = false;
+function selectBox(box, addToSelection = false) {
+  if (!addToSelection) {
+    // Clear all selections
+    selectedBoxes.forEach(b => {
+      b.material.transparent = true;
+      b.material.opacity = 1;
+      b.material.needsUpdate = true;
+      b.userData.handles.forEach(h => h.visible = false);
+      if (b.userData.edges) b.userData.edges.visible = false;
+    });
+    selectedBoxes = [];
+    selectedBox = null;
   }
-  selectedBox = box;
+  
   if (box) {
-    box.material.transparent = true;
-    box.material.opacity = 0.5;
-    box.material.needsUpdate = true;
-    if (editMode === 'scale') {
-      box.userData.handles.forEach(h => h.visible = true);
+    const idx = selectedBoxes.indexOf(box);
+    if (idx >= 0 && addToSelection) {
+      // Remove from selection if Ctrl+clicking already selected box
+      selectedBoxes.splice(idx, 1);
+      box.material.opacity = 1;
+      box.material.needsUpdate = true;
+      box.userData.handles.forEach(h => h.visible = false);
+      if (box.userData.edges) box.userData.edges.visible = false;
+      selectedBox = selectedBoxes.length > 0 ? selectedBoxes[selectedBoxes.length - 1] : null;
+    } else if (idx < 0) {
+      // Add to selection
+      selectedBoxes.push(box);
+      selectedBox = box;
+      box.material.transparent = true;
+      box.material.opacity = 0.5;
+      box.material.needsUpdate = true;
+      if (editMode === 'scale' && selectedBoxes.length === 1) {
+        box.userData.handles.forEach(h => h.visible = true);
+      }
+      if (box.userData.edges) box.userData.edges.visible = true;
+      // Update color picker to match selected box
+      const colorHex = '#' + (box.userData.baseColor || 0x4a9eff).toString(16).padStart(6, '0');
+      document.getElementById('boxColor').value = colorHex;
     }
-    if (box.userData.edges) box.userData.edges.visible = true;
-    // Update color picker to match selected box
-    const colorHex = '#' + (box.userData.baseColor || 0x4a9eff).toString(16).padStart(6, '0');
-    document.getElementById('boxColor').value = colorHex;
   }
+  
+  // Only show handles for single selection in scale mode
+  if (editMode === 'scale') {
+    selectedBoxes.forEach(b => {
+      b.userData.handles.forEach(h => h.visible = selectedBoxes.length === 1);
+    });
+  }
+  
   updateGizmo();
 }
 
 function deleteSelected() {
-  if (!selectedBox) return;
-  selectedBox.userData.handles.forEach(h => scene.remove(h));
-  scene.remove(selectedBox);
-  boxes.splice(boxes.indexOf(selectedBox), 1);
+  if (selectedBoxes.length === 0) return;
+  selectedBoxes.forEach(box => {
+    box.userData.handles.forEach(h => scene.remove(h));
+    scene.remove(box);
+    boxes.splice(boxes.indexOf(box), 1);
+  });
+  selectedBoxes = [];
   selectedBox = null;
   updateGizmo();
 }
@@ -401,6 +436,7 @@ let moveStartPos = null;
 // Click vs drag detection
 let mouseDownPos = null;
 let pendingHit = null;
+let pendingCtrlKey = false;
 const DRAG_THRESHOLD = 5; // pixels
 
 renderer.domElement.addEventListener('mousedown', (e) => {
@@ -409,11 +445,12 @@ renderer.domElement.addEventListener('mousedown', (e) => {
   raycaster.setFromCamera(mouse, camera);
   
   mouseDownPos = { x: e.clientX, y: e.clientY };
+  pendingCtrlKey = e.ctrlKey;
   
-  // Check handles FIRST (scale mode) - priority over everything
-  if (selectedBox && editMode === 'scale' && drawMode === 'none') {
+  // Check handles FIRST (scale mode) - priority over everything (single selection only)
+  if (selectedBoxes.length === 1 && editMode === 'scale' && drawMode === 'none') {
     // Use a separate raycaster check that ignores other geometry
-    const handleHits = raycaster.intersectObjects(selectedBox.userData.handles, false);
+    const handleHits = raycaster.intersectObjects(selectedBoxes[0].userData.handles, false);
     if (handleHits.length > 0) {
       activeHandle = handleHits[0].object;
       controls.enabled = false;
@@ -428,21 +465,26 @@ renderer.domElement.addEventListener('mousedown', (e) => {
       
       dragStart = activeHandle.position.clone();
       dragData = {
-        startScale: selectedBox.scale.clone(),
-        startPos: selectedBox.position.clone()
+        startScale: selectedBoxes[0].scale.clone(),
+        startPos: selectedBoxes[0].position.clone()
       };
       // Show edges while resizing
-      if (selectedBox.userData.edges) selectedBox.userData.edges.visible = true;
+      if (selectedBoxes[0].userData.edges) selectedBoxes[0].userData.edges.visible = true;
       return;
     }
   }
   
   // Check move arrows and planes
-  if (selectedBox && editMode === 'move' && drawMode === 'none') {
+  if (selectedBoxes.length > 0 && editMode === 'move' && drawMode === 'none') {
     const gizmoHits = raycaster.intersectObjects(getAllGizmoObjects(), false);
     if (gizmoHits.length > 0) {
       const hitObj = gizmoHits[0].object;
       controls.enabled = false;
+      
+      // Calculate center of all selected boxes for gizmo position
+      const center = new THREE.Vector3();
+      selectedBoxes.forEach(box => center.add(box.position));
+      center.divideScalar(selectedBoxes.length);
       
       if (hitObj.userData.isMovePlane) {
         activeMovePlane = hitObj;
@@ -451,19 +493,22 @@ renderer.domElement.addEventListener('mousedown', (e) => {
         if (!axes.includes('x')) normal.x = 1;
         else if (!axes.includes('y')) normal.y = 1;
         else normal.z = 1;
-        plane.setFromNormalAndCoplanarPoint(normal, selectedBox.position);
+        plane.setFromNormalAndCoplanarPoint(normal, center);
       } else if (hitObj.userData.isMoveArrow) {
         activeMoveArrow = hitObj;
         plane.setFromNormalAndCoplanarPoint(
-          camera.position.clone().sub(selectedBox.position).normalize(),
-          selectedBox.position
+          camera.position.clone().sub(center).normalize(),
+          center
         );
       }
       
-      moveStartPos = selectedBox.position.clone();
+      // Store start positions for all selected boxes
+      moveStartPos = selectedBoxes.map(box => box.position.clone());
       raycaster.ray.intersectPlane(plane, intersection);
       dragStart = intersection.clone();
-      if (selectedBox.userData.edges) selectedBox.userData.edges.visible = true;
+      selectedBoxes.forEach(box => {
+        if (box.userData.edges) box.userData.edges.visible = true;
+      });
       return;
     }
   }
@@ -572,14 +617,15 @@ renderer.domElement.addEventListener('mousemove', (e) => {
     if (raycaster.ray.intersectPlane(plane, intersection)) {
       const axes = activeMovePlane.userData.axes;
       
-      selectedBox.position.copy(moveStartPos);
-      axes.forEach(axis => {
-        let delta = intersection[axis] - dragStart[axis];
-        delta = snap(delta);
-        selectedBox.position[axis] = moveStartPos[axis] + delta;
+      selectedBoxes.forEach((box, i) => {
+        box.position.copy(moveStartPos[i]);
+        axes.forEach(axis => {
+          let delta = intersection[axis] - dragStart[axis];
+          delta = snap(delta);
+          box.position[axis] = moveStartPos[i][axis] + delta;
+        });
+        updateHandles(box);
       });
-      
-      updateHandles(selectedBox);
       updateGizmo();
     }
     return;
@@ -592,9 +638,11 @@ renderer.domElement.addEventListener('mousemove', (e) => {
       let delta = intersection[axis] - dragStart[axis];
       delta = snap(delta);
       
-      selectedBox.position.copy(moveStartPos);
-      selectedBox.position[axis] += delta;
-      updateHandles(selectedBox);
+      selectedBoxes.forEach((box, i) => {
+        box.position.copy(moveStartPos[i]);
+        box.position[axis] += delta;
+        updateHandles(box);
+      });
       updateGizmo();
     }
     return;
@@ -714,7 +762,7 @@ renderer.domElement.addEventListener('mousemove', (e) => {
   }
   
   // Move arrow and plane hover effect
-  if (selectedBox && editMode === 'move' && !activeMoveArrow && !activeMovePlane) {
+  if (selectedBoxes.length > 0 && editMode === 'move' && !activeMoveArrow && !activeMovePlane) {
     // Reset all colors
     Object.values(moveArrows).forEach(a => {
       a.coneMat.color.setHex(a.originalColor);
@@ -746,10 +794,10 @@ renderer.domElement.addEventListener('mousemove', (e) => {
     }
   }
   
-  // Handle hover effect (scale mode)
-  if (selectedBox && editMode === 'scale' && !activeHandle) {
-    const handleHits = raycaster.intersectObjects(selectedBox.userData.handles);
-    selectedBox.userData.handles.forEach(h => h.material.color.setHex(0xffff00));
+  // Handle hover effect (scale mode - single selection only)
+  if (selectedBoxes.length === 1 && editMode === 'scale' && !activeHandle) {
+    const handleHits = raycaster.intersectObjects(selectedBoxes[0].userData.handles);
+    selectedBoxes[0].userData.handles.forEach(h => h.material.color.setHex(0xffff00));
     if (handleHits.length > 0) {
       handleHits[0].object.material.color.setHex(0xffff00);
       renderer.domElement.style.cursor = 'pointer';
@@ -789,9 +837,11 @@ renderer.domElement.addEventListener('mouseup', () => {
   // If we had a pending hit and didn't drag, it's a click = select
   if (pendingHit && drawMode === 'none') {
     if (pendingHit.object.userData.isBox) {
-      selectBox(pendingHit.object);
+      selectBox(pendingHit.object, pendingCtrlKey);
     } else {
-      selectBox(null);
+      if (!pendingCtrlKey) {
+        selectBox(null);
+      }
     }
   }
   
@@ -820,6 +870,7 @@ renderer.domElement.addEventListener('mouseup', () => {
   }
   
   pendingHit = null;
+  pendingCtrlKey = false;
   mouseDownPos = null;
   activeHandle = null;
   activeMoveArrow = null;
@@ -841,11 +892,11 @@ document.getElementById('gridSize').addEventListener('input', (e) => {
 });
 document.getElementById('boxColor').addEventListener('input', (e) => {
   currentColor = parseInt(e.target.value.slice(1), 16);
-  // Apply to selected box
-  if (selectedBox) {
-    selectedBox.userData.baseColor = currentColor;
-    selectedBox.material.color.setHex(currentColor);
-  }
+  // Apply to all selected boxes
+  selectedBoxes.forEach(box => {
+    box.userData.baseColor = currentColor;
+    box.material.color.setHex(currentColor);
+  });
 });
 document.getElementById('sunAzimuth').addEventListener('input', (e) => {
   sunAzimuth = parseFloat(e.target.value);
@@ -862,9 +913,10 @@ document.getElementById('modeMove').addEventListener('click', () => setMode('mov
 
 function setMode(mode) {
   editMode = mode;
-  if (selectedBox) {
-    selectedBox.userData.handles.forEach(h => h.visible = mode === 'scale');
-  }
+  // Only show handles for single selection in scale mode
+  selectedBoxes.forEach(box => {
+    box.userData.handles.forEach(h => h.visible = mode === 'scale' && selectedBoxes.length === 1);
+  });
   updateGizmo();
   updateModeUI();
 }
@@ -907,13 +959,19 @@ document.addEventListener('mousedown', (e) => {
 });
 
 function duplicateSelected() {
-  if (!selectedBox) return;
-  const s = selectedBox.scale;
-  const p = selectedBox.position;
-  const baseY = p.y - s.y / 2;
-  const newBox = createBox(p.x, baseY, p.z, s.x, s.y, s.z, selectedBox.userData.baseColor);
-  newBox.position.copy(p);
-  selectBox(newBox);
+  if (selectedBoxes.length === 0) return;
+  const newBoxes = [];
+  selectedBoxes.forEach(box => {
+    const s = box.scale;
+    const p = box.position;
+    const baseY = p.y - s.y / 2;
+    const newBox = createBox(p.x, baseY, p.z, s.x, s.y, s.z, box.userData.baseColor);
+    newBox.position.copy(p);
+    newBoxes.push(newBox);
+  });
+  // Select all new boxes
+  selectBox(null);
+  newBoxes.forEach(box => selectBox(box, true));
 }
 
 function updateModeUI() {
@@ -934,8 +992,11 @@ function animate() {
   controls.update();
   
   // Update gizmo scale based on camera distance
-  if (gizmoGroup.visible && selectedBox) {
-    const dist = camera.position.distanceTo(selectedBox.position);
+  if (gizmoGroup.visible && selectedBoxes.length > 0) {
+    const center = new THREE.Vector3();
+    selectedBoxes.forEach(box => center.add(box.position));
+    center.divideScalar(selectedBoxes.length);
+    const dist = camera.position.distanceTo(center);
     const scale = dist * 0.08;
     gizmoGroup.scale.setScalar(scale);
   }
