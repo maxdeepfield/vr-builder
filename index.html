@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Level Prototyper</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; font-family: system-ui, sans-serif; }
+    #ui {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(0,0,0,0.8); padding: 8px 12px; color: #fff;
+      display: flex; align-items: center; gap: 12px;
+    }
+    #ui button {
+      background: #4a9eff; border: none; color: #fff; padding: 6px 12px;
+      border-radius: 4px; cursor: pointer;
+    }
+    #ui button:hover { background: #3a8eef; }
+    #ui button.mode-btn { background: #555; }
+    #ui button.mode-btn.active { background: #4a9eff; }
+    #ui label { display: flex; align-items: center; gap: 4px; }
+    #ui input[type="number"] { width: 50px; }
+    #ui input[type="range"] { width: 80px; }
+    .separator { width: 1px; height: 20px; background: #444; }
+    #info {
+      position: fixed; bottom: 10px; left: 10px; z-index: 100;
+      background: rgba(0,0,0,0.7); padding: 8px 12px; border-radius: 6px; color: #aaa; font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <label>Grid: <input type="number" id="gridSize" value="0.5" min="0.1" step="0.1"></label>
+    <label>Color: <input type="color" id="boxColor" value="#ffffff"></label>
+    <div class="separator"></div>
+    <button id="modeScale" class="mode-btn active">Scale (S)</button>
+    <button id="modeMove" class="mode-btn">Move (W)</button>
+    <div class="separator"></div>
+    <label>Sun: <input type="range" id="sunAzimuth" min="0" max="360" value="45"></label>
+    <label>↕ <input type="range" id="sunElevation" min="5" max="90" value="60"></label>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
