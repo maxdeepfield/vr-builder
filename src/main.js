@@ -95,6 +95,11 @@ let drawAxis2 = 'z'; // Second axis for base rectangle
 let extrudeAxis = 'y'; // Axis for extrusion
 let extrudeSign = 1; // Direction of extrusion
 
+// Shape mode: 'box' or 'cylinder'
+let shapeMode = 'box';
+let drawCenter = null; // Center point for cylinder drawing
+let drawRadius = 0; // Radius for cylinder
+
 // Draw guide helpers
 const drawGuideMat = new THREE.LineBasicMaterial({ color: 0xffff00, depthTest: false });
 const drawDotGeo = new THREE.SphereGeometry(0.08, 8, 8);
@@ -106,7 +111,7 @@ scene.add(drawDot);
 
 // Line for single-axis drawing
 const drawLineGeo = new THREE.BufferGeometry();
-drawLineGeo.setAttribute('position', new THREE.Float32BufferAttribute([0,0,0, 0,0,0], 3));
+drawLineGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3));
 const drawLine = new THREE.Line(drawLineGeo, drawGuideMat);
 drawLine.visible = false;
 drawLine.renderOrder = 1000;
@@ -114,11 +119,22 @@ scene.add(drawLine);
 
 // Rectangle outline for base drawing
 const drawRectGeo = new THREE.BufferGeometry();
-drawRectGeo.setAttribute('position', new THREE.Float32BufferAttribute([0,0,0, 0,0,0, 0,0,0, 0,0,0], 3));
+drawRectGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
 const drawRect = new THREE.LineLoop(drawRectGeo, drawGuideMat);
 drawRect.visible = false;
 drawRect.renderOrder = 1000;
 scene.add(drawRect);
+
+// Circle outline for cylinder base drawing
+const circleSegments = 32;
+const drawCircleGeo = new THREE.BufferGeometry();
+const circlePositions = new Float32Array(circleSegments * 3);
+drawCircleGeo.setAttribute('position', new THREE.BufferAttribute(circlePositions, 3));
+const drawCircle = new THREE.LineLoop(drawCircleGeo, drawGuideMat);
+drawCircle.visible = false;
+drawCircle.renderOrder = 1000;
+scene.add(drawCircle);
+
 let previewBox = null;
 const previewMat = new THREE.MeshLambertMaterial({ color: 0xffaa00, transparent: true, opacity: 0.5 });
 
@@ -147,7 +163,7 @@ const movePlanes = {};
 ['x', 'y', 'z'].forEach(axis => {
   const dir = new THREE.Vector3();
   dir[axis] = 1;
-  
+
   // Arrow line (visual only)
   const lineGeo = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0, 0),
@@ -157,38 +173,38 @@ const movePlanes = {};
   const line = new THREE.Line(lineGeo, lineMat);
   line.renderOrder = 1000;
   gizmoGroup.add(line);
-  
+
   // Clickable cylinder along the line
   const cylGeo = new THREE.CylinderGeometry(0.08, 0.08, arrowLength, 8);
   const cylMat = new THREE.MeshBasicMaterial({ color: arrowColors[axis], depthTest: false, transparent: true, opacity: 0.01 });
   const cylinder = new THREE.Mesh(cylGeo, cylMat);
   cylinder.position.copy(dir.clone().multiplyScalar(arrowLength / 2));
-  
+
   // Rotate cylinder to align with axis
   if (axis === 'x') cylinder.rotation.z = Math.PI / 2;
   else if (axis === 'z') cylinder.rotation.x = Math.PI / 2;
-  
+
   cylinder.userData.isMoveArrow = true;
   cylinder.userData.axis = axis;
   cylinder.renderOrder = 1000;
   gizmoGroup.add(cylinder);
-  
+
   // Arrow cone at end
   const coneGeo = new THREE.ConeGeometry(0.12, 0.3, 8);
   const coneMat = new THREE.MeshBasicMaterial({ color: arrowColors[axis], depthTest: false });
   const cone = new THREE.Mesh(coneGeo, coneMat);
   cone.position.copy(dir.clone().multiplyScalar(arrowLength));
-  
+
   // Rotate cone to point along axis
   if (axis === 'x') cone.rotation.z = -Math.PI / 2;
   else if (axis === 'y') cone.rotation.x = 0;
   else if (axis === 'z') cone.rotation.x = Math.PI / 2;
-  
+
   cone.userData.isMoveArrow = true;
   cone.userData.axis = axis;
   cone.renderOrder = 1000;
   gizmoGroup.add(cone);
-  
+
   moveArrows[axis] = { line, cylinder, cone, lineMat, coneMat, originalColor: arrowColors[axis] };
 });
 
@@ -203,12 +219,12 @@ const planeConfigs = [
 
 planeConfigs.forEach(cfg => {
   const planeGeo = new THREE.PlaneGeometry(planeSize, planeSize);
-  const planeMat = new THREE.MeshBasicMaterial({ 
-    color: cfg.color, 
-    transparent: true, 
-    opacity: 0.3, 
+  const planeMat = new THREE.MeshBasicMaterial({
+    color: cfg.color,
+    transparent: true,
+    opacity: 0.3,
     side: THREE.DoubleSide,
-    depthTest: false 
+    depthTest: false
   });
   const planeMesh = new THREE.Mesh(planeGeo, planeMat);
   planeMesh.position.set(...cfg.pos);
@@ -217,7 +233,7 @@ planeConfigs.forEach(cfg => {
   planeMesh.userData.axes = cfg.axes;
   planeMesh.renderOrder = 1000;
   gizmoGroup.add(planeMesh);
-  
+
   movePlanes[cfg.name] = { mesh: planeMesh, mat: planeMat, originalColor: cfg.color, axes: cfg.axes };
 });
 
@@ -229,7 +245,7 @@ function updateGizmo() {
     center.divideScalar(selectedBoxes.length);
     gizmoGroup.position.copy(center);
     gizmoGroup.visible = true;
-    
+
     // Scale gizmo based on camera distance to keep constant screen size
     const dist = camera.position.distanceTo(center);
     const scale = dist * 0.1;
@@ -276,7 +292,7 @@ function snap(val) {
 
 function createBox(x, y, z, w = 1, h = 1, d = 1, color = null) {
   const geo = new THREE.BoxGeometry(1, 1, 1);
-  const mat = new THREE.MeshLambertMaterial({ 
+  const mat = new THREE.MeshLambertMaterial({
     color: color || currentColor,
     transparent: true,
     opacity: 1
@@ -290,17 +306,17 @@ function createBox(x, y, z, w = 1, h = 1, d = 1, color = null) {
   mesh.receiveShadow = true;
   scene.add(mesh);
   boxes.push(mesh);
-  
+
   // Create edge highlight wireframe
   const edgesGeo = new THREE.EdgesGeometry(geo);
   const edgesMat = new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 2 });
   const edges = new THREE.LineSegments(edgesGeo, edgesMat);
   edges.visible = false;
   edges.renderOrder = 998;
-  edges.raycast = () => {}; // Disable raycasting on edges
+  edges.raycast = () => { }; // Disable raycasting on edges
   mesh.add(edges);
   mesh.userData.edges = edges;
-  
+
   // Create resize handles (6 faces) - cones pointing outward
   mesh.userData.handles = [];
   const dirs = [
@@ -311,14 +327,14 @@ function createBox(x, y, z, w = 1, h = 1, d = 1, color = null) {
     { axis: 'z', sign: 1, rot: [Math.PI / 2, 0, 0] },
     { axis: 'z', sign: -1, rot: [-Math.PI / 2, 0, 0] }
   ];
-  
+
   dirs.forEach(dir => {
     const handleGeo = new THREE.ConeGeometry(0.08, 0.15, 8);
-    const handleMatClone = new THREE.MeshBasicMaterial({ 
-      color: 0xffff00, 
-      depthTest: false, 
-      transparent: true, 
-      opacity: 0.4 
+    const handleMatClone = new THREE.MeshBasicMaterial({
+      color: 0xffff00,
+      depthTest: false,
+      transparent: true,
+      opacity: 0.4
     });
     const handle = new THREE.Mesh(handleGeo, handleMatClone);
     handle.rotation.set(...dir.rot);
@@ -331,22 +347,122 @@ function createBox(x, y, z, w = 1, h = 1, d = 1, color = null) {
     scene.add(handle);
     mesh.userData.handles.push(handle);
   });
-  
+
   updateHandles(mesh);
   return mesh;
 }
 
 function updateHandles(box) {
   const handles = box.userData.handles;
+  if (!handles || handles.length === 0) return;
+
   const p = box.position;
   const s = box.scale;
-  
-  handles[0].position.set(p.x + s.x / 2, p.y, p.z); // +X
-  handles[1].position.set(p.x - s.x / 2, p.y, p.z); // -X
-  handles[2].position.set(p.x, p.y + s.y / 2, p.z); // +Y
-  handles[3].position.set(p.x, p.y - s.y / 2, p.z); // -Y
-  handles[4].position.set(p.x, p.y, p.z + s.z / 2); // +Z
-  handles[5].position.set(p.x, p.y, p.z - s.z / 2); // -Z
+
+  if (box.userData.isCylinder) {
+    const rx = s.x;
+    const rz = s.z;
+    const h = s.y;
+
+    // Local positions for handles (before rotation)
+    const localPositions = [
+      new THREE.Vector3(rx, 0, 0),   // +X radius
+      new THREE.Vector3(-rx, 0, 0),  // -X radius
+      new THREE.Vector3(0, 0, rz),   // +Z radius
+      new THREE.Vector3(0, 0, -rz),  // -Z radius
+      new THREE.Vector3(0, h / 2, 0),  // +Y height (top)
+      new THREE.Vector3(0, -h / 2, 0)  // -Y height (bottom)
+    ];
+
+    // Apply rotation and position
+    localPositions.forEach((localPos, i) => {
+      localPos.applyEuler(box.rotation);
+      handles[i].position.copy(p).add(localPos);
+
+      // Also rotate the handle cone to point outward correctly
+      if (i < 4) {
+        // Radius handles - point outward from center
+        const dir = localPos.clone().normalize();
+        handles[i].quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      } else {
+        // Height handles - point along cylinder axis
+        const axisDir = new THREE.Vector3(0, i === 4 ? 1 : -1, 0).applyEuler(box.rotation);
+        handles[i].quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), axisDir);
+      }
+    });
+  } else {
+    // Box handles
+    handles[0].position.set(p.x + s.x / 2, p.y, p.z); // +X
+    handles[1].position.set(p.x - s.x / 2, p.y, p.z); // -X
+    handles[2].position.set(p.x, p.y + s.y / 2, p.z); // +Y
+    handles[3].position.set(p.x, p.y - s.y / 2, p.z); // -Y
+    handles[4].position.set(p.x, p.y, p.z + s.z / 2); // +Z
+    handles[5].position.set(p.x, p.y, p.z - s.z / 2); // -Z
+  }
+}
+
+function createCylinder(x, y, z, radius = 1, height = 1, color = null) {
+  const geo = new THREE.CylinderGeometry(1, 1, 1, 32);
+  const mat = new THREE.MeshLambertMaterial({
+    color: color || currentColor,
+    transparent: true,
+    opacity: 1
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y + height / 2, z);
+  mesh.scale.set(radius, height, radius);
+  mesh.userData.isBox = true; // Treat as selectable object
+  mesh.userData.isCylinder = true;
+  mesh.userData.baseColor = color || currentColor;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+  boxes.push(mesh);
+
+  // Create edge highlight wireframe
+  const edgesGeo = new THREE.EdgesGeometry(geo);
+  const edgesMat = new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 2 });
+  const edges = new THREE.LineSegments(edgesGeo, edgesMat);
+  edges.visible = false;
+  edges.renderOrder = 998;
+  edges.raycast = () => { };
+  mesh.add(edges);
+  mesh.userData.edges = edges;
+
+  // Create resize handles for cylinder
+  mesh.userData.handles = [];
+  const dirs = [
+    { axis: 'x', sign: 1, rot: [0, 0, -Math.PI / 2], isRadius: true },
+    { axis: 'x', sign: -1, rot: [0, 0, Math.PI / 2], isRadius: true },
+    { axis: 'z', sign: 1, rot: [Math.PI / 2, 0, 0], isRadius: true },
+    { axis: 'z', sign: -1, rot: [-Math.PI / 2, 0, 0], isRadius: true },
+    { axis: 'y', sign: 1, rot: [0, 0, 0], isRadius: false },
+    { axis: 'y', sign: -1, rot: [Math.PI, 0, 0], isRadius: false }
+  ];
+
+  dirs.forEach(dir => {
+    const handleGeo = new THREE.ConeGeometry(0.08, 0.15, 8);
+    const handleMatClone = new THREE.MeshBasicMaterial({
+      color: 0xffff00,
+      depthTest: false,
+      transparent: true,
+      opacity: 0.4
+    });
+    const handle = new THREE.Mesh(handleGeo, handleMatClone);
+    handle.rotation.set(...dir.rot);
+    handle.userData.isHandle = true;
+    handle.userData.axis = dir.axis;
+    handle.userData.sign = dir.sign;
+    handle.userData.isRadius = dir.isRadius;
+    handle.userData.parentBox = mesh;
+    handle.visible = false;
+    handle.renderOrder = 999;
+    scene.add(handle);
+    mesh.userData.handles.push(handle);
+  });
+
+  updateHandles(mesh);
+  return mesh;
 }
 
 function selectBox(box, addToSelection = false) {
@@ -362,7 +478,7 @@ function selectBox(box, addToSelection = false) {
     selectedBoxes = [];
     selectedBox = null;
   }
-  
+
   if (box) {
     const idx = selectedBoxes.indexOf(box);
     if (idx >= 0 && addToSelection) {
@@ -389,14 +505,14 @@ function selectBox(box, addToSelection = false) {
       document.getElementById('boxColor').value = colorHex;
     }
   }
-  
+
   // Only show handles for single selection in scale mode
   if (editMode === 'scale') {
     selectedBoxes.forEach(b => {
       b.userData.handles.forEach(h => h.visible = selectedBoxes.length === 1);
     });
   }
-  
+
   updateGizmo();
 }
 
@@ -443,10 +559,10 @@ renderer.domElement.addEventListener('mousedown', (e) => {
   if (e.button !== 0) return;
   updateMouse(e);
   raycaster.setFromCamera(mouse, camera);
-  
+
   mouseDownPos = { x: e.clientX, y: e.clientY };
   pendingCtrlKey = e.ctrlKey;
-  
+
   // Check handles FIRST (scale mode) - priority over everything (single selection only)
   if (selectedBoxes.length === 1 && editMode === 'scale' && drawMode === 'none') {
     // Use a separate raycaster check that ignores other geometry
@@ -454,7 +570,7 @@ renderer.domElement.addEventListener('mousedown', (e) => {
     if (handleHits.length > 0) {
       activeHandle = handleHits[0].object;
       controls.enabled = false;
-      
+
       const axis = activeHandle.userData.axis;
       const normal = new THREE.Vector3();
       normal[axis] = 1;
@@ -462,7 +578,7 @@ renderer.domElement.addEventListener('mousedown', (e) => {
         camera.position.clone().sub(activeHandle.position).normalize(),
         activeHandle.position
       );
-      
+
       dragStart = activeHandle.position.clone();
       dragData = {
         startScale: selectedBoxes[0].scale.clone(),
@@ -473,19 +589,19 @@ renderer.domElement.addEventListener('mousedown', (e) => {
       return;
     }
   }
-  
+
   // Check move arrows and planes
   if (selectedBoxes.length > 0 && editMode === 'move' && drawMode === 'none') {
     const gizmoHits = raycaster.intersectObjects(getAllGizmoObjects(), false);
     if (gizmoHits.length > 0) {
       const hitObj = gizmoHits[0].object;
       controls.enabled = false;
-      
+
       // Calculate center of all selected boxes for gizmo position
       const center = new THREE.Vector3();
       selectedBoxes.forEach(box => center.add(box.position));
       center.divideScalar(selectedBoxes.length);
-      
+
       if (hitObj.userData.isMovePlane) {
         activeMovePlane = hitObj;
         const axes = hitObj.userData.axes;
@@ -501,7 +617,7 @@ renderer.domElement.addEventListener('mousedown', (e) => {
           center
         );
       }
-      
+
       // Store start positions for all selected boxes
       moveStartPos = selectedBoxes.map(box => box.position.clone());
       raycaster.ray.intersectPlane(plane, intersection);
@@ -512,33 +628,58 @@ renderer.domElement.addEventListener('mousedown', (e) => {
       return;
     }
   }
-  
+
   // Store hit for potential draw or select
   if (drawMode === 'none') {
     const allTargets = [groundMesh, ...boxes];
     const hits = raycaster.intersectObjects(allTargets, false);
-    
+
     if (hits.length > 0) {
       pendingHit = hits[0];
       controls.enabled = false;
     }
   }
-  
-  // Confirm height, finalize box
+
+  // Confirm height, finalize box/cylinder
   if (drawMode === 'height' && previewBox) {
-    if (previewBox.scale[extrudeAxis] >= gridSize) {
+    const s = previewBox.scale;
+    const heightOk = shapeMode === 'cylinder' ? s.y >= gridSize : s[extrudeAxis] >= gridSize;
+
+    if (heightOk) {
       const p = previewBox.position;
-      const s = previewBox.scale;
-      // Calculate base position (where extrusion started)
-      const basePos = p.clone();
-      basePos[extrudeAxis] -= extrudeSign * s[extrudeAxis] / 2;
-      const box = createBox(basePos.x, basePos.y - s.y / 2, basePos.z, s.x, s.y, s.z);
-      box.position.copy(p);
-      selectBox(box);
+
+      let newShape;
+      if (shapeMode === 'cylinder') {
+        // For cylinder: scale.x = scale.z = radius, scale.y = height (in local space)
+        const radius = s.x;
+        const height = s.y;
+
+        // Create cylinder at the correct position
+        newShape = createCylinder(drawCenter.x, 0, drawCenter.z, radius, height);
+        newShape.position.copy(p);
+
+        // Apply rotation based on extrude axis
+        if (extrudeAxis === 'x') {
+          newShape.rotation.z = Math.PI / 2;
+        } else if (extrudeAxis === 'z') {
+          newShape.rotation.x = Math.PI / 2;
+        }
+
+        // Update handles after position and rotation are set
+        updateHandles(newShape);
+      } else {
+        // Calculate base position (where extrusion started)
+        const basePos = p.clone();
+        basePos[extrudeAxis] -= extrudeSign * s[extrudeAxis] / 2;
+        newShape = createBox(basePos.x, basePos.y - s.y / 2, basePos.z, s.x, s.y, s.z);
+        newShape.position.copy(p);
+      }
+      selectBox(newShape);
     }
     scene.remove(previewBox);
     previewBox = null;
     drawMode = 'none';
+    drawCircle.visible = false;
     controls.enabled = true;
     return;
   }
@@ -547,30 +688,30 @@ renderer.domElement.addEventListener('mousedown', (e) => {
 renderer.domElement.addEventListener('mousemove', (e) => {
   updateMouse(e);
   raycaster.setFromCamera(mouse, camera);
-  
+
   // Check if we should start drawing (drag threshold)
   if (pendingHit && mouseDownPos && drawMode === 'none') {
     const dx = e.clientX - mouseDownPos.x;
     const dy = e.clientY - mouseDownPos.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    
+
     if (dist > DRAG_THRESHOLD) {
       // Start drawing
       const hit = pendingHit;
       pendingHit = null;
-      
+
       // Determine face normal and drawing axes
       let faceNormal = new THREE.Vector3(0, 1, 0);
-      
+
       if (hit.object.userData.isBox) {
         faceNormal = hit.face.normal.clone();
         faceNormal.transformDirection(hit.object.matrixWorld);
       }
-      
+
       const absX = Math.abs(faceNormal.x);
       const absY = Math.abs(faceNormal.y);
       const absZ = Math.abs(faceNormal.z);
-      
+
       // Snap normal to dominant axis
       if (absY > absX && absY > absZ) {
         // Horizontal face (top/bottom) - draw on XZ, extrude Y
@@ -594,16 +735,24 @@ renderer.domElement.addEventListener('mousemove', (e) => {
         extrudeAxis = 'z';
         extrudeSign = Math.sign(faceNormal.z);
       }
-      
+
       selectBox(null);
       drawMode = 'base';
-      
+
       drawStart = hit.point.clone();
       drawStart.x = snap(drawStart.x);
       drawStart.y = snap(drawStart.y);
       drawStart.z = snap(drawStart.z);
-      
-      previewBox = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), previewMat.clone());
+      drawCenter = drawStart.clone();
+
+      if (shapeMode === 'cylinder') {
+        previewBox = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 32), previewMat.clone());
+        // Rotate cylinder based on extrude axis
+        if (extrudeAxis === 'x') previewBox.rotation.z = Math.PI / 2;
+        else if (extrudeAxis === 'z') previewBox.rotation.x = Math.PI / 2;
+      } else {
+        previewBox = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), previewMat.clone());
+      }
       previewBox.position.copy(drawStart);
       previewBox.scale.set(0.01, 0.01, 0.01);
       previewBox.visible = false;
@@ -611,12 +760,12 @@ renderer.domElement.addEventListener('mousemove', (e) => {
       scene.add(previewBox);
     }
   }
-  
+
   // Moving with plane (2 axes)
   if (activeMovePlane && moveStartPos) {
     if (raycaster.ray.intersectPlane(plane, intersection)) {
       const axes = activeMovePlane.userData.axes;
-      
+
       selectedBoxes.forEach((box, i) => {
         box.position.copy(moveStartPos[i]);
         axes.forEach(axis => {
@@ -630,14 +779,14 @@ renderer.domElement.addEventListener('mousemove', (e) => {
     }
     return;
   }
-  
+
   // Moving with arrow
   if (activeMoveArrow && moveStartPos) {
     if (raycaster.ray.intersectPlane(plane, intersection)) {
       const axis = activeMoveArrow.userData.axis;
       let delta = intersection[axis] - dragStart[axis];
       delta = snap(delta);
-      
+
       selectedBoxes.forEach((box, i) => {
         box.position.copy(moveStartPos[i]);
         box.position[axis] += delta;
@@ -647,99 +796,144 @@ renderer.domElement.addEventListener('mousemove', (e) => {
     }
     return;
   }
-  
+
   // Drawing base rectangle
   if (drawMode === 'base' && previewBox && drawStart) {
     // Create plane perpendicular to face normal at drawStart
     const drawPlane = new THREE.Plane();
     drawPlane.setFromNormalAndCoplanarPoint(drawFaceNormal, drawStart);
-    
+
     const pt = new THREE.Vector3();
     if (raycaster.ray.intersectPlane(drawPlane, pt)) {
       pt.x = snap(pt.x);
       pt.y = snap(pt.y);
       pt.z = snap(pt.z);
-      
-      const min1 = Math.min(drawStart[drawAxis1], pt[drawAxis1]);
-      const max1 = Math.max(drawStart[drawAxis1], pt[drawAxis1]);
-      const min2 = Math.min(drawStart[drawAxis2], pt[drawAxis2]);
-      const max2 = Math.max(drawStart[drawAxis2], pt[drawAxis2]);
-      
-      const size1 = max1 - min1;
-      const size2 = max2 - min2;
-      
+
       // Position for guides (slightly offset from surface)
       const guidePos = drawStart.clone();
       guidePos[extrudeAxis] += extrudeSign * 0.02;
-      
+
       // Show dot at start point
       drawDot.position.copy(guidePos);
       drawDot.visible = true;
-      
-      // Calculate corner positions for guides
-      const c1 = new THREE.Vector3().copy(drawStart);
-      const c2 = new THREE.Vector3().copy(drawStart);
-      const c3 = new THREE.Vector3().copy(drawStart);
-      const c4 = new THREE.Vector3().copy(drawStart);
-      
-      c1[drawAxis1] = min1; c1[drawAxis2] = min2;
-      c2[drawAxis1] = max1; c2[drawAxis2] = min2;
-      c3[drawAxis1] = max1; c3[drawAxis2] = max2;
-      c4[drawAxis1] = min1; c4[drawAxis2] = max2;
-      
-      const offset = extrudeSign * 0.02;
-      c1[extrudeAxis] += offset;
-      c2[extrudeAxis] += offset;
-      c3[extrudeAxis] += offset;
-      c4[extrudeAxis] += offset;
-      
-      // Show line if only one axis has movement
-      if ((size1 >= gridSize && size2 < gridSize) || (size1 < gridSize && size2 >= gridSize)) {
-        drawLine.visible = true;
-        drawRect.visible = false;
-        previewBox.visible = false;
-        const positions = drawLine.geometry.attributes.position.array;
-        positions[0] = guidePos.x; positions[1] = guidePos.y; positions[2] = guidePos.z;
-        const endPt = guidePos.clone();
-        endPt[drawAxis1] = pt[drawAxis1];
-        endPt[drawAxis2] = pt[drawAxis2];
-        positions[3] = endPt.x; positions[4] = endPt.y; positions[5] = endPt.z;
-        drawLine.geometry.attributes.position.needsUpdate = true;
-      }
-      // Show rectangle outline when both axes have movement
-      else if (size1 >= gridSize && size2 >= gridSize) {
-        drawLine.visible = false;
-        drawRect.visible = true;
-        previewBox.visible = true;
-        
-        // Set preview box scale and position
-        const scale = new THREE.Vector3(0.05, 0.05, 0.05);
-        scale[drawAxis1] = size1;
-        scale[drawAxis2] = size2;
-        previewBox.scale.copy(scale);
-        
-        const pos = new THREE.Vector3();
-        pos[drawAxis1] = min1 + size1 / 2;
-        pos[drawAxis2] = min2 + size2 / 2;
-        pos[extrudeAxis] = drawStart[extrudeAxis] + extrudeSign * 0.025;
-        previewBox.position.copy(pos);
-        
-        const positions = drawRect.geometry.attributes.position.array;
-        positions[0] = c1.x; positions[1] = c1.y; positions[2] = c1.z;
-        positions[3] = c2.x; positions[4] = c2.y; positions[5] = c2.z;
-        positions[6] = c3.x; positions[7] = c3.y; positions[8] = c3.z;
-        positions[9] = c4.x; positions[10] = c4.y; positions[11] = c4.z;
-        drawRect.geometry.attributes.position.needsUpdate = true;
+
+      if (shapeMode === 'cylinder') {
+        // Cylinder mode: draw circle from center
+        const dx = pt[drawAxis1] - drawStart[drawAxis1];
+        const dz = pt[drawAxis2] - drawStart[drawAxis2];
+        drawRadius = snap(Math.sqrt(dx * dx + dz * dz));
+
+        if (drawRadius >= gridSize) {
+          drawLine.visible = false;
+          drawRect.visible = false;
+          drawCircle.visible = true;
+          previewBox.visible = true;
+
+          // Update circle outline
+          const positions = drawCircle.geometry.attributes.position.array;
+          for (let i = 0; i < circleSegments; i++) {
+            const angle = (i / circleSegments) * Math.PI * 2;
+            const cx = drawStart[drawAxis1] + Math.cos(angle) * drawRadius;
+            const cz = drawStart[drawAxis2] + Math.sin(angle) * drawRadius;
+            const pos = new THREE.Vector3();
+            pos[drawAxis1] = cx;
+            pos[drawAxis2] = cz;
+            pos[extrudeAxis] = drawStart[extrudeAxis] + extrudeSign * 0.02;
+            positions[i * 3] = pos.x;
+            positions[i * 3 + 1] = pos.y;
+            positions[i * 3 + 2] = pos.z;
+          }
+          drawCircle.geometry.attributes.position.needsUpdate = true;
+
+          // Update preview cylinder - cylinder geometry has height along Y
+          // When rotated, we need to set scale correctly
+          // CylinderGeometry(1,1,1) has radius 1, so scale = radius (not diameter)
+          previewBox.scale.set(drawRadius, 0.05, drawRadius);
+          previewBox.position.copy(drawStart);
+          previewBox.position[extrudeAxis] += extrudeSign * 0.025;
+        } else {
+          drawLine.visible = false;
+          drawRect.visible = false;
+          drawCircle.visible = false;
+          previewBox.visible = false;
+        }
       } else {
-        // Just dot, no movement yet
-        drawLine.visible = false;
-        drawRect.visible = false;
-        previewBox.visible = false;
+        // Box mode: draw rectangle
+        drawCircle.visible = false;
+
+        const min1 = Math.min(drawStart[drawAxis1], pt[drawAxis1]);
+        const max1 = Math.max(drawStart[drawAxis1], pt[drawAxis1]);
+        const min2 = Math.min(drawStart[drawAxis2], pt[drawAxis2]);
+        const max2 = Math.max(drawStart[drawAxis2], pt[drawAxis2]);
+
+        const size1 = max1 - min1;
+        const size2 = max2 - min2;
+
+        // Calculate corner positions for guides
+        const c1 = new THREE.Vector3().copy(drawStart);
+        const c2 = new THREE.Vector3().copy(drawStart);
+        const c3 = new THREE.Vector3().copy(drawStart);
+        const c4 = new THREE.Vector3().copy(drawStart);
+
+        c1[drawAxis1] = min1; c1[drawAxis2] = min2;
+        c2[drawAxis1] = max1; c2[drawAxis2] = min2;
+        c3[drawAxis1] = max1; c3[drawAxis2] = max2;
+        c4[drawAxis1] = min1; c4[drawAxis2] = max2;
+
+        const offset = extrudeSign * 0.02;
+        c1[extrudeAxis] += offset;
+        c2[extrudeAxis] += offset;
+        c3[extrudeAxis] += offset;
+        c4[extrudeAxis] += offset;
+
+        // Show line if only one axis has movement
+        if ((size1 >= gridSize && size2 < gridSize) || (size1 < gridSize && size2 >= gridSize)) {
+          drawLine.visible = true;
+          drawRect.visible = false;
+          previewBox.visible = false;
+          const positions = drawLine.geometry.attributes.position.array;
+          positions[0] = guidePos.x; positions[1] = guidePos.y; positions[2] = guidePos.z;
+          const endPt = guidePos.clone();
+          endPt[drawAxis1] = pt[drawAxis1];
+          endPt[drawAxis2] = pt[drawAxis2];
+          positions[3] = endPt.x; positions[4] = endPt.y; positions[5] = endPt.z;
+          drawLine.geometry.attributes.position.needsUpdate = true;
+        }
+        // Show rectangle outline when both axes have movement
+        else if (size1 >= gridSize && size2 >= gridSize) {
+          drawLine.visible = false;
+          drawRect.visible = true;
+          previewBox.visible = true;
+
+          // Set preview box scale and position
+          const scale = new THREE.Vector3(0.05, 0.05, 0.05);
+          scale[drawAxis1] = size1;
+          scale[drawAxis2] = size2;
+          previewBox.scale.copy(scale);
+
+          const pos = new THREE.Vector3();
+          pos[drawAxis1] = min1 + size1 / 2;
+          pos[drawAxis2] = min2 + size2 / 2;
+          pos[extrudeAxis] = drawStart[extrudeAxis] + extrudeSign * 0.025;
+          previewBox.position.copy(pos);
+
+          const positions = drawRect.geometry.attributes.position.array;
+          positions[0] = c1.x; positions[1] = c1.y; positions[2] = c1.z;
+          positions[3] = c2.x; positions[4] = c2.y; positions[5] = c2.z;
+          positions[6] = c3.x; positions[7] = c3.y; positions[8] = c3.z;
+          positions[9] = c4.x; positions[10] = c4.y; positions[11] = c4.z;
+          drawRect.geometry.attributes.position.needsUpdate = true;
+        } else {
+          // Just dot, no movement yet
+          drawLine.visible = false;
+          drawRect.visible = false;
+          previewBox.visible = false;
+        }
       }
     }
     return;
   }
-  
+
   // Drawing height/extrusion
   if (drawMode === 'height' && previewBox && drawStart) {
     const heightPlane = new THREE.Plane();
@@ -754,13 +948,18 @@ renderer.domElement.addEventListener('mousemove', (e) => {
       extrudeAmount = extrudeAmount * extrudeSign; // Make it always positive in extrude direction
       extrudeAmount = snap(extrudeAmount);
       extrudeAmount = Math.max(gridSize, extrudeAmount);
-      
-      previewBox.scale[extrudeAxis] = extrudeAmount;
+
+      if (shapeMode === 'cylinder') {
+        // Cylinder height is in scale.y (local space)
+        previewBox.scale.y = extrudeAmount;
+      } else {
+        previewBox.scale[extrudeAxis] = extrudeAmount;
+      }
       previewBox.position[extrudeAxis] = drawStart[extrudeAxis] + extrudeSign * extrudeAmount / 2;
     }
     return;
   }
-  
+
   // Move arrow and plane hover effect
   if (selectedBoxes.length > 0 && editMode === 'move' && !activeMoveArrow && !activeMovePlane) {
     // Reset all colors
@@ -772,7 +971,7 @@ renderer.domElement.addEventListener('mousemove', (e) => {
       p.mat.color.setHex(p.originalColor);
       p.mat.opacity = 0.3;
     });
-    
+
     // Check all gizmo objects
     const gizmoHits = raycaster.intersectObjects(getAllGizmoObjects(), false);
     if (gizmoHits.length > 0) {
@@ -793,7 +992,7 @@ renderer.domElement.addEventListener('mousemove', (e) => {
       renderer.domElement.style.cursor = 'default';
     }
   }
-  
+
   // Handle hover effect (scale mode - single selection only)
   if (selectedBoxes.length === 1 && editMode === 'scale' && !activeHandle) {
     const handleHits = raycaster.intersectObjects(selectedBoxes[0].userData.handles);
@@ -805,29 +1004,36 @@ renderer.domElement.addEventListener('mousemove', (e) => {
       renderer.domElement.style.cursor = 'default';
     }
   }
-  
+
   // Handle dragging (scale)
   if (activeHandle && dragData) {
     if (raycaster.ray.intersectPlane(plane, intersection)) {
       const axis = activeHandle.userData.axis;
       const sign = activeHandle.userData.sign;
       const box = activeHandle.userData.parentBox;
-      
-      let delta = intersection[axis] - dragStart[axis];
+
+      // Get handle local direction
+      const localDir = new THREE.Vector3();
+      localDir[axis] = sign;
+
+      // Get world direction of the handle
+      const worldDir = localDir.clone().applyQuaternion(box.quaternion);
+
+      // Calculate projected delta in world space along handle axis
+      const mouseDelta = intersection.clone().sub(dragStart);
+      let delta = mouseDelta.dot(worldDir);
       delta = snap(delta);
-      
-      if (sign > 0) {
-        const newScale = Math.max(gridSize, dragData.startScale[axis] + delta);
-        box.scale[axis] = newScale;
-        const diff = newScale - dragData.startScale[axis];
-        box.position[axis] = dragData.startPos[axis] + diff / 2;
-      } else {
-        const newScale = Math.max(gridSize, dragData.startScale[axis] - delta);
-        box.scale[axis] = newScale;
-        const diff = newScale - dragData.startScale[axis];
-        box.position[axis] = dragData.startPos[axis] - diff / 2;
-      }
-      
+
+      const oldScaleVal = dragData.startScale[axis];
+      const newScaleVal = Math.max(gridSize, oldScaleVal + delta);
+      const actualDelta = newScaleVal - oldScaleVal;
+
+      box.scale[axis] = newScaleVal;
+
+      // Move position by half the scale change in the handle's world direction
+      // This makes the "back" side stay in place
+      box.position.copy(dragData.startPos).add(worldDir.clone().multiplyScalar(actualDelta / 2));
+
       updateHandles(box);
     }
   }
@@ -844,31 +1050,43 @@ renderer.domElement.addEventListener('mouseup', () => {
       }
     }
   }
-  
+
   // Auto-transition from base to height phase on mouse up
   if (drawMode === 'base' && previewBox) {
     // Hide base drawing guides
     drawDot.visible = false;
     drawLine.visible = false;
     drawRect.visible = false;
-    
-    const size1 = previewBox.scale[drawAxis1];
-    const size2 = previewBox.scale[drawAxis2];
-    
-    if (previewBox.visible && size1 >= gridSize && size2 >= gridSize) {
+    drawCircle.visible = false;
+
+    let validBase = false;
+    if (shapeMode === 'cylinder') {
+      validBase = previewBox.visible && drawRadius >= gridSize;
+    } else {
+      const size1 = previewBox.scale[drawAxis1];
+      const size2 = previewBox.scale[drawAxis2];
+      validBase = previewBox.visible && size1 >= gridSize && size2 >= gridSize;
+    }
+
+    if (validBase) {
       drawMode = 'height';
       drawStart = previewBox.position.clone();
       // Adjust drawStart to be at the base of extrusion
-      drawStart[extrudeAxis] = previewBox.position[extrudeAxis] - extrudeSign * previewBox.scale[extrudeAxis] / 2;
+      if (shapeMode === 'cylinder') {
+        // Cylinder height is in scale.y (local space)
+        drawStart[extrudeAxis] = previewBox.position[extrudeAxis] - extrudeSign * previewBox.scale.y / 2;
+      } else {
+        drawStart[extrudeAxis] = previewBox.position[extrudeAxis] - extrudeSign * previewBox.scale[extrudeAxis] / 2;
+      }
     } else {
-      // Cancel if no valid rectangle drawn
+      // Cancel if no valid base drawn
       scene.remove(previewBox);
       previewBox = null;
       drawMode = 'none';
       controls.enabled = true;
     }
   }
-  
+
   pendingHit = null;
   pendingCtrlKey = false;
   mouseDownPos = null;
@@ -911,6 +1129,20 @@ document.getElementById('sunElevation').addEventListener('input', (e) => {
 document.getElementById('modeScale').addEventListener('click', () => setMode('scale'));
 document.getElementById('modeMove').addEventListener('click', () => setMode('move'));
 
+// Shape buttons
+document.getElementById('shapeBox').addEventListener('click', () => setShape('box'));
+document.getElementById('shapeCylinder').addEventListener('click', () => setShape('cylinder'));
+
+function setShape(shape) {
+  shapeMode = shape;
+  updateShapeUI();
+}
+
+function updateShapeUI() {
+  document.getElementById('shapeBox').classList.toggle('active', shapeMode === 'box');
+  document.getElementById('shapeCylinder').classList.toggle('active', shapeMode === 'cylinder');
+}
+
 function setMode(mode) {
   editMode = mode;
   // Only show handles for single selection in scale mode
@@ -919,6 +1151,93 @@ function setMode(mode) {
   });
   updateGizmo();
   updateModeUI();
+}
+
+// Save/Load
+document.getElementById('saveScene').addEventListener('click', saveScene);
+document.getElementById('loadScene').addEventListener('click', () => {
+  document.getElementById('loadInput').click();
+});
+document.getElementById('loadInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    try {
+      const data = JSON.parse(event.target.result);
+
+      // Clear current scene
+      [...boxes].forEach(box => {
+        box.userData.handles.forEach(h => scene.remove(h));
+        scene.remove(box);
+      });
+      boxes.length = 0;
+      selectedBoxes = [];
+      selectedBox = null;
+      updateGizmo();
+
+      // Restore settings
+      gridSize = data.gridSize || 0.5;
+      document.getElementById('gridSize').value = gridSize;
+
+      sunAzimuth = data.sunAzimuth || 45;
+      document.getElementById('sunAzimuth').value = sunAzimuth;
+
+      sunElevation = data.sunElevation || 60;
+      document.getElementById('sunElevation').value = sunElevation;
+      updateSunPosition();
+
+      // Recreate objects
+      if (data.objects) {
+        data.objects.forEach(obj => {
+          let mesh;
+          const pos = obj.position;
+          const scl = obj.scale;
+          const rot = obj.rotation;
+          const col = obj.color;
+
+          if (obj.type === 'cylinder') {
+            const yBase = pos[1] - scl[1] / 2;
+            mesh = createCylinder(pos[0], yBase, pos[2], scl[0], scl[1], col);
+          } else {
+            const yBase = pos[1] - scl[1] / 2;
+            mesh = createBox(pos[0], yBase, pos[2], scl[0], scl[1], scl[2], col);
+          }
+          if (rot) mesh.rotation.fromArray(rot);
+          updateHandles(mesh);
+        });
+      }
+    } catch (err) {
+      console.error('Error loading scene:', err);
+      alert('Failed to load scene file.');
+    }
+    e.target.value = ''; // Reset input
+  };
+  reader.readAsText(file);
+});
+
+function saveScene() {
+  const sceneData = {
+    gridSize,
+    sunAzimuth,
+    sunElevation,
+    objects: boxes.map(box => ({
+      type: box.userData.isCylinder ? 'cylinder' : 'box',
+      position: box.position.toArray(),
+      scale: box.scale.toArray(),
+      rotation: [box.rotation.x, box.rotation.y, box.rotation.z],
+      color: box.userData.baseColor
+    }))
+  };
+
+  const blob = new Blob([JSON.stringify(sceneData, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'scene.json';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 // Keyboard shortcuts
@@ -945,6 +1264,7 @@ document.addEventListener('keydown', (e) => {
     drawDot.visible = false;
     drawLine.visible = false;
     drawRect.visible = false;
+    drawCircle.visible = false;
     drawMode = 'none';
     controls.enabled = true;
   }
@@ -964,10 +1284,20 @@ function duplicateSelected() {
   selectedBoxes.forEach(box => {
     const s = box.scale;
     const p = box.position;
-    const baseY = p.y - s.y / 2;
-    const newBox = createBox(p.x, baseY, p.z, s.x, s.y, s.z, box.userData.baseColor);
-    newBox.position.copy(p);
-    newBoxes.push(newBox);
+    let newShape;
+    if (box.userData.isCylinder) {
+      const baseY = p.y - s.y / 2;
+      // s.x is radius for cylinder
+      newShape = createCylinder(p.x, baseY, p.z, s.x, s.y, box.userData.baseColor);
+      newShape.position.copy(p);
+      newShape.rotation.copy(box.rotation);
+      updateHandles(newShape);
+    } else {
+      const baseY = p.y - s.y / 2;
+      newShape = createBox(p.x, baseY, p.z, s.x, s.y, s.z, box.userData.baseColor);
+      newShape.position.copy(p);
+    }
+    newBoxes.push(newShape);
   });
   // Select all new boxes
   selectBox(null);
@@ -990,7 +1320,7 @@ window.addEventListener('resize', () => {
 function animate() {
   requestAnimationFrame(animate);
   controls.update();
-  
+
   // Update gizmo scale based on camera distance
   if (gizmoGroup.visible && selectedBoxes.length > 0) {
     const center = new THREE.Vector3();
@@ -1000,7 +1330,7 @@ function animate() {
     const scale = dist * 0.08;
     gizmoGroup.scale.setScalar(scale);
   }
-  
+
   renderer.render(scene, camera);
 }
 animate();
